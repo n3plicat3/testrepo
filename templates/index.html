@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Linux Log Monitor Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body data-refresh-interval="{{ refresh_interval_ms }}">
+<div class="page">
+    <header class="app-header">
+        <div class="app-title-block">
+            <div class="app-pill">Log Observability</div>
+            <h1 class="app-title">Linux Log Monitoring Dashboard</h1>
+            <p class="app-subtitle">
+                Real-time visibility into your core Linux log streams with configurable regex normalization.
+            </p>
+        </div>
+        <div class="app-header-meta">
+            <span class="meta-label">Last updated:</span>
+            <span id="lastUpdated" class="meta-value">—</span>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <!-- Metric cards -->
+        <section class="card-grid">
+            <div class="metric-card">
+                <div class="metric-card-header">
+                    <span class="metric-label">Total Events (window)</span>
+                    <span class="metric-tag">All Logs</span>
+                </div>
+                <div class="metric-value" id="totalEvents" data-value="0">0</div>
+                <div class="metric-footer">
+                    <span id="totalEventsTrend" class="metric-trend neutral">Trend: —</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-card-header">
+                    <span class="metric-label">Error &amp; Critical</span>
+                    <span class="metric-tag metric-tag-danger">Risk</span>
+                </div>
+                <div class="metric-value" id="errorEvents" data-value="0">0</div>
+                <div class="metric-footer">
+                    <span id="errorRate" class="metric-trend danger">Error rate: —</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-card-header">
+                    <span class="metric-label">Monitored Logs</span>
+                    <span class="metric-tag metric-tag-info">Sources</span>
+                </div>
+                <div class="metric-value" id="logsMonitored" data-value="0">0</div>
+                <div class="metric-footer">
+                    <span id="topLogName" class="metric-trend info">Top source: —</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Charts row -->
+        <section class="chart-grid">
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h2>Events over Time</h2>
+                    <p>Rolling snapshot of total vs. error events.</p>
+                </div>
+                <canvas id="eventsOverTime"></canvas>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h2>Events by Log Source</h2>
+                    <p>Distribution of events across configured log files.</p>
+                </div>
+                <canvas id="eventsByLog"></canvas>
+            </div>
+        </section>
+
+        <!-- Logs table -->
+        <section class="logs-section">
+            <div class="logs-header">
+                <div>
+                    <h2>Recent Events (normalized)</h2>
+                    <p>Parsed using dynamic regex patterns defined in <code>config/logs.json</code>.</p>
+                </div>
+            </div>
+
+            <div class="logs-table-wrapper">
+                <table class="logs-table">
+                    <thead>
+                    <tr>
+                        <th>Log Source</th>
+                        <th>Timestamp</th>
+                        <th>Level</th>
+                        <th>Process</th>
+                        <th>Message</th>
+                    </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                    <tr>
+                        <td colspan="5" class="placeholder-row">Waiting for data...</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

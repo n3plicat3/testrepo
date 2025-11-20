@@ -1,0 +1,33 @@
+{
+  "ui": {
+    "refresh_interval_ms": 4000,
+    "max_lines_per_log": 300
+  },
+  "logs": [
+    {
+      "id": "syslog",
+      "name": "System Log",
+      "path": "/var/log/syslog",
+      "enabled": true,
+      "pattern": "^(?P<timestamp>\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)\\s+(?P<host>\\S+)\\s+(?P<process>[^:]+):\\s+(?P<message>.*)$",
+      "level_patterns": {
+        "critical": "(?i)\\bpanic\\b|\\bcrit(ical)?\\b|\\balert\\b",
+        "error": "(?i)\\berror\\b|\\bfail(ed)?\\b",
+        "warning": "(?i)\\bwarn(ing)?\\b",
+        "info": "(?i)\\binfo\\b|\\bstarted\\b|\\bstopped\\b"
+      }
+    },
+    {
+      "id": "auth",
+      "name": "Auth Log",
+      "path": "/var/log/auth.log",
+      "enabled": true,
+      "pattern": "^(?P<timestamp>\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)\\s+(?P<host>\\S+)\\s+(?P<process>[^:]+):\\s+(?P<message>.*)$",
+      "level_patterns": {
+        "error": "(?i)failed|denied|invalid",
+        "warning": "(?i)bad password|max retries",
+        "info": "(?i)accepted|session opened|session closed"
+      }
+    }
+  ]
+}
