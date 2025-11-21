@@ -1,5 +1,7 @@
 let metricsChart = null;
 let logBarChart = null;
+let __logsData = [];
+let __insights = null;
 
 function animateCounter(el, from, to, duration = 450) {
     from = Number(from) || 0;
@@ -227,18 +229,42 @@ function levelClass(level) {
     return "level-default";
 }
 
+function applyLogFilters(logs) {
+    const src = (document.getElementById("filterSource")?.value || "").trim();
+    const lvl = (document.getElementById("filterLevel")?.value || "").trim().toLowerCase();
+    const q = (document.getElementById("filterSearch")?.value || "").trim().toLowerCase();
+
+    const filtered = [];
+    (logs || []).forEach(log => {
+        if (src && (log.id !== src)) return;
+        const events = (log.events || []).filter(ev => {
+            const evLevel = (ev.level || "").toLowerCase();
+            if (lvl && evLevel !== lvl) return false;
+            if (q) {
+                const hay = `${ev.timestamp || ''} ${ev.process || ''} ${ev.message || ev.raw || ''}`.toLowerCase();
+                if (hay.indexOf(q) === -1) return false;
+            }
+            return true;
+        });
+        filtered.push({...log, events});
+    });
+    return filtered;
+}
+
 function updateLogsTable(logs) {
     const tbody = document.getElementById("logsTableBody");
     tbody.innerHTML = "";
 
-    if (!logs || logs.length === 0) {
+    const list = applyLogFilters(logs);
+
+    if (!list || list.length === 0 || list.every(l => (l.events || []).length === 0)) {
         const tr = document.createElement("tr");
         tr.innerHTML = `<td colspan="5" class="placeholder-row">No log data available.</td>`;
         tbody.appendChild(tr);
         return;
     }
 
-    logs.forEach(log => {
+    list.forEach(log => {
         const logName = log.name || log.id || "Unknown";
         (log.events || []).slice().reverse().forEach(ev => {
             const tr = document.createElement("tr");
@@ -278,11 +304,91 @@ function fetchLogs() {
     fetch("/api/logs")
         .then(r => r.json())
         .then(data => {
-            updateLogsTable(data);
+            __logsData = data || [];
+            // Populate source filter options once
+            const srcSel = document.getElementById("filterSource");
+            if (srcSel && srcSel.options.length <= 1) {
+                (__logsData || []).forEach(l => {
+                    const opt = document.createElement("option");
+                    opt.value = l.id;
+                    opt.textContent = l.name || l.id;
+                    srcSel.appendChild(opt);
+                });
+            }
+            updateLogsTable(__logsData);
         })
         .catch(err => {
             console.error("Failed to fetch logs", err);
         });
+}
+
+function renderInsights(ins) {
+    const riskEl = document.getElementById("insightsRiskList");
+    if (riskEl) {
+        const items = (ins.risks || []).slice(0, 6).map(r => `
+            <div class="insight-item">
+                <div>
+                    <div class="insight-title">${r.name} <span class="badge badge-risk">Risk ${r.risk}</span></div>
+                    <div class="insight-sub">Errors: ${r.error_events} • Error rate: ${(r.error_rate*100).toFixed(1)}%</div>
+                </div>
+                <div class="insight-sub">Events: ${r.events}</div>
+            </div>
+        `).join("");
+        riskEl.innerHTML = items || '<div class="insight-sub">No risk signals.</div>';
+        riskEl.classList.remove('placeholder');
+    }
+
+    const patEl = document.getElementById("insightsPatterns");
+    if (patEl) {
+        const items = (ins.top_error_patterns || []).slice(0, 8).map(p => `
+            <div class="insight-item">
+                <div>
+                    <div class="insight-title">${p.name || p.log_id || 'Unknown'}</div>
+                    <div class="insight-sub">${p.signature}</div>
+                </div>
+                <div class="insight-sub">x${p.count}</div>
+            </div>
+        `).join("");
+        patEl.innerHTML = items || '<div class="insight-sub">No error patterns.</div>';
+        patEl.classList.remove('placeholder');
+    }
+
+    const procEl = document.getElementById("insightsProcesses");
+    if (procEl) {
+        const items = (ins.noisy_processes || []).slice(0, 8).map(p => `
+            <div class="insight-item">
+                <div class="insight-title">${p.process}</div>
+                <div class="insight-sub">${p.events} events</div>
+            </div>
+        `).join("");
+        procEl.innerHTML = items || '<div class="insight-sub">No process data.</div>';
+        procEl.classList.remove('placeholder');
+    }
+
+    const rareEl = document.getElementById("insightsRare");
+    if (rareEl) {
+        const items = (ins.rare_events || []).slice(0, 8).map(p => `
+            <div class="insight-item">
+                <div>
+                    <div class="insight-title">${p.name || 'Unknown source'}</div>
+                    <div class="insight-sub">${p.signature}</div>
+                </div>
+                <div class="insight-sub">unique</div>
+            </div>
+        `).join("");
+        rareEl.innerHTML = items || '<div class="insight-sub">No rare events now.</div>';
+        rareEl.classList.remove('placeholder');
+    }
+}
+
+function fetchInsights() {
+    fetch("/api/insights")
+        .then(r => r.json())
+        .then(ins => {
+            __insights = ins;
+            renderInsights(ins);
+        })
+        .catch(err => console.error("Failed to fetch insights", err));
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -290,7 +396,51 @@ document.addEventListener("DOMContentLoaded", () => {
 
     fetchMetrics();
     fetchLogs();
+    fetchInsights();
 
     setInterval(fetchMetrics, refreshInterval);
     setInterval(fetchLogs, refreshInterval * 2);
+    setInterval(fetchInsights, refreshInterval * 2);
+
+    // Load pipeline config
+    fetch("/api/config/pipeline")
+        .then(r => r.json())
+        .then(p => {
+            const w = document.getElementById("inpWorkers");
+            const m = document.getElementById("inpMps");
+            if (w && typeof p.workers !== "undefined") w.value = p.workers;
+            if (m && typeof p.mps_limit !== "undefined") m.value = p.mps_limit;
+        })
+        .catch(() => {});
+
+    // Save handler
+    const btn = document.getElementById("btnSavePipeline");
+    if (btn) {
+        btn.addEventListener("click", () => {
+            const w = Number(document.getElementById("inpWorkers").value || 4);
+            const m = Number(document.getElementById("inpMps").value || 0);
+            const msgEl = document.getElementById("pipelineSaveMsg");
+            fetch("/api/config/pipeline", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({workers: w, mps_limit: m})
+            })
+                .then(r => r.json().then(j => ({ok: r.ok, j})))
+                .then(({ok, j}) => {
+                    msgEl.textContent = ok ? "Saved" : (j.warning || j.error || "Error");
+                    setTimeout(() => { msgEl.textContent = ""; }, 2000);
+                })
+                .catch(() => {
+                    msgEl.textContent = "Error";
+                    setTimeout(() => { msgEl.textContent = ""; }, 2000);
+                });
+        });
+    }
+
+    // Filters
+    const srcSel = document.getElementById("filterSource");
+    const lvlSel = document.getElementById("filterLevel");
+    const qInp = document.getElementById("filterSearch");
+    [srcSel, lvlSel].forEach(el => el && el.addEventListener("change", () => updateLogsTable(__logsData)));
+    qInp && qInp.addEventListener("input", () => updateLogsTable(__logsData));
 });

@@ -27,6 +27,11 @@
         <div class="app-header-meta">
             <span class="meta-label">Last updated:</span>
             <span id="lastUpdated" class="meta-value">—</span>
+            <div style="margin-top:6px; font-size:12px;">
+                <a href="/report?period=daily" style="color:#9ca3af; text-decoration:none; margin-right:8px;">Daily Report</a>
+                <a href="/report?period=monthly" style="color:#9ca3af; text-decoration:none; margin-right:8px;">Monthly</a>
+                <a href="/report?period=quarterly" style="color:#9ca3af; text-decoration:none;">Quarterly</a>
+            </div>
         </div>
     </header>
 
@@ -86,12 +91,99 @@
             </div>
         </section>
 
+        <!-- Insights -->
+        <section class="insights-grid">
+            <div class="insights-card">
+                <div class="chart-header">
+                    <h2>Risk & Anomalies</h2>
+                    <p>Per-log risk score and detected spikes.</p>
+                </div>
+                <div id="insightsRiskList" class="insights-list placeholder">Loading insights…</div>
+            </div>
+
+            <div class="insights-card">
+                <div class="chart-header">
+                    <h2>Top Error Patterns</h2>
+                    <p>Grouped error signatures from recent events.</p>
+                </div>
+                <div id="insightsPatterns" class="insights-list placeholder">Loading patterns…</div>
+            </div>
+
+            <div class="insights-card">
+                <div class="chart-header">
+                    <h2>Noisiest Processes</h2>
+                    <p>Processes contributing most events.</p>
+                </div>
+                <div id="insightsProcesses" class="insights-list placeholder">Loading processes…</div>
+            </div>
+
+            <div class="insights-card">
+                <div class="chart-header">
+                    <h2>Rare Events</h2>
+                    <p>Unique error signatures to investigate.</p>
+                </div>
+                <div id="insightsRare" class="insights-list placeholder">Loading rare events…</div>
+            </div>
+        </section>
+
+        <!-- Settings -->
+        <section class="logs-section" style="display:flex; gap:14px; align-items:flex-end;">
+            <div style="flex:1;">
+                <h2 style="margin:0; font-size:14px; font-weight:500;">Pipeline Settings</h2>
+                <p style="margin:3px 0 8px; font-size:11px; color:#9ca3af;">Tune workers and MPS limit live; persisted to config.</p>
+                <div style="display:flex; gap:12px;">
+                    <label style="display:flex; flex-direction:column; font-size:12px; color:#9ca3af;">
+                        Workers
+                        <input id="inpWorkers" type="number" min="1" max="64" value="4" style="margin-top:4px; background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:8px; padding:6px 8px; width:120px;">
+                    </label>
+                    <label style="display:flex; flex-direction:column; font-size:12px; color:#9ca3af;">
+                        MPS Limit (0 = unlimited)
+                        <input id="inpMps" type="number" min="0" max="1000000" value="0" style="margin-top:4px; background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:8px; padding:6px 8px; width:180px;">
+                    </label>
+                    <button id="btnSavePipeline" style="height:34px; align-self:flex-end; background:#111827; color:#e5e7eb; border:1px solid #4b5563; border-radius:8px; padding:6px 12px; cursor:pointer;">Save</button>
+                    <span id="pipelineSaveMsg" style="font-size:12px; color:#9ca3af; align-self:center;">&nbsp;</span>
+                </div>
+            </div>
+            <div style="flex:1; text-align:right;">
+                <h2 style="margin:0; font-size:14px; font-weight:500;">Export Reports</h2>
+                <p style="margin:3px 0 8px; font-size:11px; color:#9ca3af;">Quick links to HTML or PDF reports.</p>
+                <div>
+                    <a href="/report?period=daily&format=html" class="log-pill" style="margin-right:6px;">Daily (HTML)</a>
+                    <a href="/report?period=daily&format=pdf" class="log-pill" style="margin-right:6px;">Daily (PDF)</a>
+                    <a href="/report?period=monthly&format=pdf" class="log-pill" style="margin-right:6px;">Monthly (PDF)</a>
+                    <a href="/report?period=quarterly&format=pdf" class="log-pill">Quarterly (PDF)</a>
+                </div>
+            </div>
+        </section>
+
         <!-- Logs table -->
         <section class="logs-section">
             <div class="logs-header">
                 <div>
                     <h2>Recent Events (normalized)</h2>
                     <p>Parsed using dynamic regex patterns defined in <code>config/logs.json</code>.</p>
+                </div>
+                <div class="logs-controls">
+                    <label>
+                        <span>Source</span>
+                        <select id="filterSource">
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Level</span>
+                        <select id="filterLevel">
+                            <option value="">All</option>
+                            <option value="critical">Critical</option>
+                            <option value="error">Error</option>
+                            <option value="warning">Warning</option>
+                            <option value="info">Info</option>
+                        </select>
+                    </label>
+                    <label class="grow">
+                        <span>Search</span>
+                        <input type="search" id="filterSearch" placeholder="Find in messages…" />
+                    </label>
                 </div>
             </div>
 

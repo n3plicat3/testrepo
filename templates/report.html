@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log Report - {{ title }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <style>
+    body { background: #0b1220; }
+    .report { max-width: 980px; margin: 24px auto; padding: 0 16px; color: #e5e7eb; }
+    .report h1 { font-size: 22px; margin: 0 0 4px; }
+    .report .muted { color: #9ca3af; font-size: 12px; }
+    .report .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+    .report .card { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 12px; }
+    .report .card h3 { margin: 0 0 4px; font-size: 12px; color: #9ca3af; }
+    .report .card .value { font-size: 24px; font-weight: 600; }
+    .report table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+    .report th, .report td { border-bottom: 1px solid #1f2937; padding: 8px 10px; text-align: left; vertical-align: top; }
+    .report th { color: #9ca3af; font-weight: 500; }
+    @media print { body { background: white; } .report { color: #111; } }
+  </style>
+  </head>
+  <body>
+  <div class="report">
+    <div class="app-pill">Report</div>
+    <h1>{{ title }} Log Report</h1>
+    <div class="muted">Generated at {{ generated_at }} | From {{ start_from }}</div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Total Events</h3>
+        <div class="value">{{ '{:,}'.format(total_events) }}</div>
+      </div>
+      <div class="card">
+        <h3>By Level</h3>
+        <div>
+          {% for lvl, cnt in by_level.items() %}
+            <div><span class="level-badge level-{{ lvl if lvl in ['info','warning','error','critical'] else 'default' }}">{{ lvl|upper }}</span> {{ '{:,}'.format(cnt) }}</div>
+          {% else %}
+            <div class="muted">No level data</div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Log Sources</h3>
+        <div class="value">{{ by_log|length }}</div>
+      </div>
+    </div>
+
+    <div class="logs-section" style="margin-top: 8px;">
+      <div class="logs-header"><h2>Breakdown by Log</h2></div>
+      <table>
+        <thead>
+        <tr>
+          <th>Log</th>
+          <th>Events</th>
+          <th>By Level</th>
+          <th>Samples</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for log in by_log.values() %}
+          <tr>
+            <td>{{ log.name }}</td>
+            <td>{{ '{:,}'.format(log.events) }}</td>
+            <td>
+              {% for lvl, cnt in log.by_level.items() %}
+                <div><strong>{{ lvl|upper }}:</strong> {{ '{:,}'.format(cnt) }}</div>
+              {% else %}
+                <span class="muted">—</span>
+              {% endfor %}
+            </td>
+            <td>
+              {% for s in log.samples %}
+                <div style="margin-bottom:6px;">{{ s }}</div>
+              {% else %}
+                <span class="muted">—</span>
+              {% endfor %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">No logs configured.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </body>
+  </html>
+

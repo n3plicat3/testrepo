@@ -246,6 +246,62 @@ body {
     height: 260px;
 }
 
+/* Insights */
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.insights-card {
+    background: var(--card-bg);
+    border-radius: var(--border-radius-lg);
+    border: 1px solid var(--card-border);
+    padding: 14px 14px 8px;
+    box-shadow: var(--shadow-subtle);
+}
+
+.insights-list.placeholder {
+    color: var(--text-subtle);
+    font-size: 12px;
+}
+
+.insight-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(31,41,55,0.9);
+}
+
+.insight-item:last-child {
+    border-bottom: none;
+}
+
+.insight-title {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.insight-sub {
+    font-size: 11px;
+    color: var(--text-subtle);
+}
+
+.badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(148,163,184,0.25);
+}
+
+.badge-risk {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: rgba(248,113,113,0.45);
+}
+
 /* Logs table */
 
 .logs-section {
@@ -273,6 +329,35 @@ body {
     margin: 3px 0 0;
     font-size: 11px;
     color: var(--text-subtle);
+}
+
+.logs-controls {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.logs-controls label {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    color: var(--text-subtle);
+    min-width: 140px;
+}
+
+.logs-controls label.grow {
+    flex: 1;
+    min-width: 200px;
+}
+
+.logs-controls select,
+.logs-controls input[type="search"] {
+    margin-top: 4px;
+    background: #0b1220;
+    color: var(--text-main);
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 6px 8px;
 }
 
 .logs-table-wrapper {
