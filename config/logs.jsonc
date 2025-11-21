@@ -1,0 +1,120 @@
+// Log Monitor Configuration (JSONC: JSON with comments)
+//
+// How to use:
+// - You can keep this commented file as your primary config.
+// - Runtime changes via the UI write to config/overrides.json so your comments stay intact.
+// - Fields are documented inline below. Most values can be changed on the fly.
+//
+// Suggested locations (Linux):
+// - Place this file under /etc/logmon/logs.jsonc and symlink into this repo's config/ if you run as a service.
+// - Set archive.dir to /var/lib/logmon/archive for derived exports (does NOT modify source logs).
+// - Set app_logging.dir to /var/log/logmon for this app's own logs.
+//
+// Integrity note:
+// - This app reads your source logs in read-only mode. It never rotates or truncates them.
+// - Optional archive exports write normalized copies to your chosen directory.
+{
+  // UI preferences
+  "ui": {
+    // Dashboard refresh in milliseconds
+    "refresh_interval_ms": 4000,
+    // Max lines to read per source file per request (upper bound)
+    "max_lines_per_log": 300
+  },
+
+  // Pipeline settings (also editable from the UI)
+  "pipeline": {
+    // Number of worker threads for per-log processing (integer or "auto")
+    "workers": 4,
+    // Messages-per-second throttle across sources (0 disables)
+    "mps_limit": 0,
+    // Hard cap of lines per source per request (0 = unlimited)
+    "batch_size": 500,
+    // PDF engine for /report?format=pdf: auto|weasyprint|pdfkit|none
+    "pdf_engine": "auto"
+  },
+
+  // Shared regex snippets to simplify patterns
+  // Reference by setting pattern or level_patterns to "${preset:NAME}"
+  "regex_presets": {
+    "syslog_basic": "^(?P<timestamp>\\\w+\\\s+\\\d+\\\s+\\\d+:\\\d+:\\\d+)\\\s+(?P<host>\\\S+)\\\s+(?P<process>[^:]+):\\\s+(?P<message>.*)$",
+    "level_error": "(?i)\\\berror\\\b|\\\bfail(ed)?\\\b",
+    "level_warning": "(?i)\\\bwarn(ing)?\\\b",
+    "level_info": "(?i)\\\binfo\\\b|\\\bstarted\\\b|\\\bstopped\\\b",
+    "level_critical": "(?i)\\\bpanic\\\b|\\\bcrit(ical)?\\\b|\\\balert\\\b"
+  },
+
+  // Optional archive of normalized events (derived), with rotation and retention
+  "archive": {
+    // Master switch for exporting normalized events to JSONL
+    "enabled": false,
+    // Destination directory for derived archives
+    // Suggest: "/var/lib/logmon/archive" when running as a service
+    "dir": "./data/archive",
+    // Rotation mode: "daily" creates one file per day per log: <dir>/<log_id>/YYYYMMDD.jsonl
+    "rotation": "daily",
+    // Retain only files newer than N days (default 2). Set 0 to prune anything older than today.
+    "retention_days": 2,
+    // When true, appends exports on fetch cycles (best effort). Disable for pull-only via API later.
+    "write_on_fetch": true,
+    // Upper bound of events written per log per fetch to avoid large bursts
+    "export_sample": 200
+  },
+
+  // App's own logs with time-based rotation. Does not touch your source logs.
+  "app_logging": {
+    "enabled": true,
+    // INFO|DEBUG|WARNING|ERROR
+    "level": "INFO",
+    // Suggest: "/var/log/logmon" when running as a service
+    "dir": "./logs",
+    // Number of days of app logs to keep
+    "retention_days": 2
+  },
+
+  // Log sources. Add as many as you need.
+  // Fields:
+  // - id: unique identifier (no spaces)
+  // - name: display name in UI
+  // - path: absolute filesystem path to the log file
+  // - enabled: set false to temporarily disable
+  // - pattern: main regex with named groups: timestamp, host, process, message (customize as needed)
+  //   You can reference a preset: "${preset:syslog_basic}".
+  // - timestamp_format: strptime format for "timestamp" field (optional)
+  // - level_patterns: map level -> regex. First match wins. Presets allowed.
+  // - transforms: optional list of find/replace regex for message normalization (does not change raw)
+  "logs": [
+    {
+      "id": "syslog",
+      "name": "System Log",
+      "path": "/var/log/system.log",
+      "enabled": true,
+      "pattern": "${preset:syslog_basic}",
+      "timestamp_format": "%b %d %H:%M:%S",
+      "level_patterns": {
+        "critical": "${preset:level_critical}",
+        "error": "${preset:level_error}",
+        "warning": "${preset:level_warning}",
+        "info": "${preset:level_info}"
+      },
+      // Example transformation: mask IPv4 addresses in the message view
+      "transforms": [
+        { "find": "\\\b(\\\d{1,3}\\\.){3}\\\d{1,3}\\\b", "replace": "<ip>" }
+      ]
+    },
+    {
+      "id": "auth",
+      "name": "Auth Log",
+      "path": "/var/log/wifi.log",
+      "enabled": true,
+      "pattern": "${preset:syslog_basic}",
+      "timestamp_format": "%b %d %H:%M:%S",
+      "level_patterns": {
+        "error": "(?i)failed|denied|invalid",
+        "warning": "(?i)bad password|max retries",
+        "info": "(?i)accepted|session opened|session closed"
+      }
+    }
+  ]
+}
+

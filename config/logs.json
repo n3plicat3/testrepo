@@ -3,13 +3,20 @@
     "refresh_interval_ms": 4000,
     "max_lines_per_log": 300
   },
+  "pipeline": {
+    "workers": 4,
+    "mps_limit": 0,
+    "batch_size": 500,
+    "pdf_engine": "auto"
+  },
   "logs": [
     {
       "id": "syslog",
       "name": "System Log",
-      "path": "/var/log/syslog",
+      "path": "/var/log/system.log",
       "enabled": true,
       "pattern": "^(?P<timestamp>\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)\\s+(?P<host>\\S+)\\s+(?P<process>[^:]+):\\s+(?P<message>.*)$",
+      "timestamp_format": "%b %d %H:%M:%S",
       "level_patterns": {
         "critical": "(?i)\\bpanic\\b|\\bcrit(ical)?\\b|\\balert\\b",
         "error": "(?i)\\berror\\b|\\bfail(ed)?\\b",
@@ -20,9 +27,10 @@
     {
       "id": "auth",
       "name": "Auth Log",
-      "path": "/var/log/auth.log",
+      "path": "/var/log/wifi.log",
       "enabled": true,
       "pattern": "^(?P<timestamp>\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)\\s+(?P<host>\\S+)\\s+(?P<process>[^:]+):\\s+(?P<message>.*)$",
+      "timestamp_format": "%b %d %H:%M:%S",
       "level_patterns": {
         "error": "(?i)failed|denied|invalid",
         "warning": "(?i)bad password|max retries",
