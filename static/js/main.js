@@ -413,6 +413,19 @@ document.addEventListener("DOMContentLoaded", () => {
         })
         .catch(() => {});
 
+    // Load archive config
+    fetch("/api/config/archive")
+        .then(r => r.json())
+        .then(a => {
+            const en = document.getElementById("archEnabled");
+            const rd = document.getElementById("archRetention");
+            const dir = document.getElementById("archDir");
+            if (en) en.checked = !!a.enabled;
+            if (rd && typeof a.retention_days !== "undefined") rd.value = a.retention_days;
+            if (dir && typeof a.dir === "string") dir.value = a.dir;
+        })
+        .catch(() => {});
+
     // Save handler
     const btn = document.getElementById("btnSavePipeline");
     if (btn) {
@@ -424,6 +437,31 @@ document.addEventListener("DOMContentLoaded", () => {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({workers: w, mps_limit: m})
+            })
+                .then(r => r.json().then(j => ({ok: r.ok, j})))
+                .then(({ok, j}) => {
+                    msgEl.textContent = ok ? "Saved" : (j.warning || j.error || "Error");
+                    setTimeout(() => { msgEl.textContent = ""; }, 2000);
+                })
+                .catch(() => {
+                    msgEl.textContent = "Error";
+                    setTimeout(() => { msgEl.textContent = ""; }, 2000);
+                });
+        });
+    }
+
+    // Save archive settings
+    const btnArch = document.getElementById("btnSaveArchive");
+    if (btnArch) {
+        btnArch.addEventListener("click", () => {
+            const en = !!document.getElementById("archEnabled").checked;
+            const rd = Number(document.getElementById("archRetention").value || 2);
+            const dir = String(document.getElementById("archDir").value || "");
+            const msgEl = document.getElementById("archiveSaveMsg");
+            fetch("/api/config/archive", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({enabled: en, retention_days: rd, dir})
             })
                 .then(r => r.json().then(j => ({ok: r.ok, j})))
                 .then(({ok, j}) => {

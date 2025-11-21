@@ -1,5 +1,7 @@
 import os
 import json
+import logging
+from logging.handlers import TimedRotatingFileHandler
 import re
 import time
 import datetime
@@ -11,12 +13,19 @@ from typing import Optional, Tuple, Dict, Any, List
 from flask import Flask, render_template, jsonify, request, make_response
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config", "logs.json")
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+# Preferred base config with comments (JSONC). Fallback to JSON.
+CONFIG_BASE_CANDIDATES = [
+    os.path.join(CONFIG_DIR, "logs.jsonc"),
+    os.path.join(CONFIG_DIR, "logs.json"),
+]
+# Overrides are written here so we never destroy comments in the base file
+CONFIG_OVERRIDES_PATH = os.path.join(CONFIG_DIR, "overrides.json")
 
 app = Flask(__name__)
 
 _config_cache = {}
-_config_mtime = 0
+_config_mtime = (0, 0)  # (base_mtime, overrides_mtime)
 metrics_history = deque(maxlen=50)  # sliding window for trends
 # Per-log rolling history for anomaly detection
 history_by_log = defaultdict(lambda: deque(maxlen=50))  # {log_id: deque of {events, error_events}}
@@ -29,36 +38,130 @@ _overrides_lock = Lock()
 def _default_config() -> dict:
     return {
         "logs": [],
-        "ui": {},
+        "ui": {
+            # Refresh and table sizes are UI-only and safe to tweak at runtime
+            "refresh_interval_ms": 4000,
+            "max_lines_per_log": 300
+        },
+        # Shared regex snippets users can reference from log definitions
+        # Example usage in logs[*].pattern: "${preset:syslog_basic}"
+        "regex_presets": {
+            "syslog_basic": r"^(?P<timestamp>\\w+\\s+\\d+\\s+\\d+:\\d+:\\d+)\\s+(?P<host>\\S+)\\s+(?P<process>[^:]+):\\s+(?P<message>.*)$",
+            "level_error": r"(?i)\\berror\\b|\\bfail(ed)?\\b",
+            "level_warning": r"(?i)\\bwarn(ing)?\\b",
+            "level_info": r"(?i)\\binfo\\b|\\bstarted\\b|\\bstopped\\b",
+            "level_critical": r"(?i)\\bpanic\\b|\\bcrit(ical)?\\b|\\balert\\b"
+        },
         "pipeline": {
             "workers": 4,           # threads for per-log processing
             "mps_limit": 0,         # messages per second limit (0 disables)
             "batch_size": 500,      # max lines per log per request
             "pdf_engine": "auto"   # auto|weasyprint|pdfkit|none
+        },
+        # Optional export of normalized events to JSONL with rotation & retention
+        "archive": {
+            "enabled": False,
+            # Where to write derived archives. Suggestion: /var/lib/logmon/archive
+            "dir": os.path.join(BASE_DIR, "data", "archive"),
+            # daily rotation is recommended for simplicity
+            "rotation": "daily",  # daily|none (size-based can be added later)
+            # Delete derived archives older than N days (default 2)
+            "retention_days": 2,
+            # Append exports when the UI fetches logs (best effort, may duplicate)
+            "write_on_fetch": True,
+            # Limit events exported per log per batch
+            "export_sample": 200
+        },
+        # Application's own logging with rotation (does not touch source logs)
+        "app_logging": {
+            "enabled": True,
+            "level": "INFO",
+            # Suggestion: /var/log/logmon
+            "dir": os.path.join(BASE_DIR, "logs"),
+            # Keep N days of app logs
+            "retention_days": 2
         }
     }
 
 
-def get_config():
-    """Load JSON config with lightweight auto-reload on change."""
-    global _config_cache, _config_mtime
+def _read_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _strip_json_comments(text: str) -> str:
+    """Remove // and /* */ comments to allow JSONC-like files."""
+    # Remove block comments
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    # Remove line comments (// ...)
+    text = re.sub(r"(^|\s)//.*$", "", text, flags=re.M)
+    return text
+
+
+def _load_base_config() -> Tuple[dict, float]:
+    for cand in CONFIG_BASE_CANDIDATES:
+        if os.path.exists(cand):
+            try:
+                raw = _read_file(cand)
+                if cand.endswith(".jsonc"):
+                    raw = _strip_json_comments(raw)
+                base = json.loads(raw)
+            except Exception:
+                base = {}
+            try:
+                mtime = os.path.getmtime(cand)
+            except OSError:
+                mtime = 0.0
+            return base, mtime
+    return {}, 0.0
+
+
+def _load_overrides() -> Tuple[dict, float]:
+    if not os.path.exists(CONFIG_OVERRIDES_PATH):
+        return {}, 0.0
     try:
-        mtime = os.path.getmtime(CONFIG_PATH)
+        with open(CONFIG_OVERRIDES_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    try:
+        mtime = os.path.getmtime(CONFIG_OVERRIDES_PATH)
     except OSError:
-        # Return cache or defaults if config missing
-        return _config_cache or _default_config()
+        mtime = 0.0
+    return data, mtime
 
-    if mtime != _config_mtime:
-        with open(CONFIG_PATH, "r") as f:
-            _config_cache = json.load(f)
-        _config_mtime = mtime
 
-    # Ensure minimal structure
-    _config_cache.setdefault("logs", [])
-    _config_cache.setdefault("ui", {})
-    _config_cache.setdefault("pipeline", _default_config()["pipeline"]) 
+def _deep_merge(a: dict, b: dict) -> dict:
+    out = dict(a)
+    for k, v in (b or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
 
-    # Apply in-memory overrides for interactive changes
+
+def get_config():
+    """Load config layering base (json/jsonc) + overrides.json, with auto-reload."""
+    global _config_cache, _config_mtime
+    base, base_mtime = _load_base_config()
+    overrides, ov_mtime = _load_overrides()
+    mtimes = (base_mtime, ov_mtime)
+
+    if mtimes != _config_mtime:
+        merged = _deep_merge(_default_config(), base)
+        merged = _deep_merge(merged, overrides)
+        # Ensure minimal structure
+        merged.setdefault("logs", [])
+        merged.setdefault("ui", {})
+        merged.setdefault("pipeline", _default_config()["pipeline"]) 
+        merged.setdefault("archive", _default_config()["archive"]) 
+        merged.setdefault("regex_presets", _default_config()["regex_presets"]) 
+        merged.setdefault("app_logging", _default_config()["app_logging"]) 
+        _config_cache = merged
+        _config_mtime = mtimes
+
+    # Apply in-memory overrides for interactive changes (pipeline only)
     with _overrides_lock:
         if _pipeline_overrides:
             merged = dict(_config_cache.get("pipeline", {}))
@@ -68,13 +171,41 @@ def get_config():
 
 
 def save_config(updated: dict) -> None:
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    # Pretty-print for readability
-    with open(CONFIG_PATH, "w") as f:
+    """Persist full config to overrides.json, preserving base file with comments."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_OVERRIDES_PATH, "w", encoding="utf-8") as f:
         json.dump(updated, f, indent=2, sort_keys=False)
     # Force reload on next read
     global _config_mtime
-    _config_mtime = 0
+    _config_mtime = (0, 0)
+
+
+def _setup_app_logging():
+    cfg = get_config().get("app_logging", {})
+    if not cfg.get("enabled", True):
+        return
+    log_dir = cfg.get("dir") or os.path.join(BASE_DIR, "logs")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+        # If we cannot create dir, skip file logging silently
+        return
+    level_name = str(cfg.get("level", "INFO")).upper()
+    level = getattr(logging, level_name, logging.INFO)
+    retention_days = int(cfg.get("retention_days", 2) or 2)
+    handler = TimedRotatingFileHandler(
+        filename=os.path.join(log_dir, "app.log"), when="midnight", backupCount=max(0, retention_days)
+    )
+    formatter = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.addHandler(handler)
+
+
+# Initialize app logging early
+_setup_app_logging()
+logger = logging.getLogger("logmon")
 
 
 class TokenBucket:
@@ -138,6 +269,15 @@ def read_last_lines(path, max_lines=300):
     return [l.decode("utf-8", errors="replace") for l in tail]
 
 
+def _resolve_preset(value: Optional[str], presets: Dict[str, str]) -> Optional[str]:
+    if not value or not isinstance(value, str):
+        return value
+    m = re.match(r"^\$\{\s*preset:(?P<name>[a-zA-Z0-9_\-]+)\s*\}$", value)
+    if m:
+        return presets.get(m.group("name")) or value
+    return value
+
+
 def normalize_log_line(line, log_conf):
     """
     Apply dynamic regex-based normalization as defined in JSON config.
@@ -150,7 +290,10 @@ def normalize_log_line(line, log_conf):
         "level": "info"
     }
 
-    pattern = log_conf.get("pattern")
+    cfg = get_config()
+    presets = cfg.get("regex_presets", {})
+
+    pattern = _resolve_preset(log_conf.get("pattern"), presets) or log_conf.get("pattern")
     if pattern:
         try:
             m = re.match(pattern, line)
@@ -164,16 +307,35 @@ def normalize_log_line(line, log_conf):
     # Use message or raw line for level normalization
     message_for_level = result.get("message", line)
     level_patterns = log_conf.get("level_patterns", {})
-
+    
     # First matching level wins (order in JSON matters)
     for level_name, level_regex in level_patterns.items():
         try:
+            level_regex = _resolve_preset(level_regex, presets) or level_regex
             if re.search(level_regex, message_for_level):
                 result["level"] = level_name
                 break
         except re.error:
             # Invalid regex shouldn't kill processing
             continue
+
+    # Optional message transformations (regex find/replace)
+    transforms = log_conf.get("transforms", [])
+    if transforms and (result.get("message") or result.get("raw")):
+        msg = result.get("message") or result.get("raw") or ""
+        for tr in transforms:
+            find = tr.get("find")
+            repl = tr.get("replace", "")
+            flags = 0
+            if str(tr.get("flags", "")).lower().find("i") >= 0:
+                flags |= re.IGNORECASE
+            if find:
+                try:
+                    msg = re.sub(find, repl, msg, flags=flags)
+                except re.error:
+                    continue
+        # Keep raw for integrity; update normalized message view
+        result["message"] = msg
 
     return result
 
@@ -524,12 +686,19 @@ def get_normalized_events(limit_per_log=50):
             ev = normalize_log_line(line, log_conf)
             events.append(ev)
 
-        logs_events.append({
+        bundle = {
             "id": log_id,
             "name": log_name,
             "path": path,
             "events": events
-        })
+        }
+        logs_events.append(bundle)
+
+    # Optional archive export with rotation/retention
+    try:
+        _maybe_export_archive(logs_events)
+    except Exception as e:
+        logger.debug(f"archive export skipped: {e}")
 
     return logs_events
 
@@ -738,3 +907,93 @@ def report():
 if __name__ == "__main__":
     # For dev: expose on all interfaces, easy to put behind nginx later
     app.run(host="0.0.0.0", port=5240, debug=True)
+
+
+def _maybe_export_archive(logs_events: List[Dict[str, Any]]):
+    cfg = get_config().get("archive", {})
+    if not cfg.get("enabled", False):
+        return
+    if not cfg.get("write_on_fetch", True):
+        return
+    base_dir = cfg.get("dir") or os.path.join(BASE_DIR, "data", "archive")
+    rotation = (cfg.get("rotation") or "daily").lower()
+    retention_days = int(cfg.get("retention_days", 2) or 2)
+    sample = int(cfg.get("export_sample", 200) or 200)
+    try:
+        os.makedirs(base_dir, exist_ok=True)
+    except Exception:
+        return
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    for le in logs_events:
+        lid = le.get("id") or "unknown"
+        events = (le.get("events") or [])[-sample:]
+        subdir = os.path.join(base_dir, lid)
+        try:
+            os.makedirs(subdir, exist_ok=True)
+        except Exception:
+            continue
+        if rotation == "daily":
+            out_path = os.path.join(subdir, f"{today}.jsonl")
+        else:
+            out_path = os.path.join(subdir, f"current.jsonl")
+        try:
+            with open(out_path, "a", encoding="utf-8") as f:
+                for ev in events:
+                    f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        except Exception:
+            # best-effort only
+            pass
+        # Retention cleanup
+        if rotation == "daily" and retention_days >= 0:
+            cutoff = datetime.datetime.now() - datetime.timedelta(days=retention_days)
+            try:
+                for name in os.listdir(subdir):
+                    if not name.endswith(".jsonl"):
+                        continue
+                    # Parse YYYYMMDD
+                    stamp = name.split(".")[0]
+                    try:
+                        dt = datetime.datetime.strptime(stamp, "%Y%m%d")
+                    except Exception:
+                        continue
+                    if dt < cutoff:
+                        try:
+                            os.remove(os.path.join(subdir, name))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+
+@app.route("/api/config/archive", methods=["GET", "POST"])
+def api_config_archive():
+    cfg = get_config()
+    arch = dict(cfg.get("archive", {}))
+    if request.method == "GET":
+        return jsonify(arch)
+    data = request.get_json(silent=True) or {}
+    allowed = {
+        "enabled": bool,
+        "dir": str,
+        "rotation": str,
+        "retention_days": int,
+        "write_on_fetch": bool,
+        "export_sample": int,
+    }
+    updates = {}
+    for k, caster in allowed.items():
+        if k in data:
+            try:
+                updates[k] = caster(data[k]) if caster is not bool else bool(data[k])
+            except Exception:
+                return jsonify({"error": f"Invalid value for {k}"}), 400
+    # Persist to overrides
+    cfg_all = get_config()
+    merged = dict(cfg_all)
+    merged["archive"] = dict(merged.get("archive", {}))
+    merged["archive"].update(updates)
+    try:
+        save_config(merged)
+    except Exception as e:
+        return jsonify({"warning": f"Applied in-memory only. Persist failed: {e}"}), 202
+    return jsonify({"ok": True, "archive": merged.get("archive", {})})
